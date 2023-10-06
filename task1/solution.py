@@ -66,7 +66,7 @@ class Model(object):
         self.gpr.fit(train_x_2D, train_y)
 
 
-def cluster_undersample(train_x_2D, train_y, n_clusters=1000):
+def cluster_undersample(train_x_2D, train_y, n_clusters=5000):
     """
     k-means clustering based undersampling. From every cluster the mean value is taken, 
     the number of samples will equal k (number of clusters).
