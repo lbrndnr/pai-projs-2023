@@ -1,8 +1,9 @@
 import os
 import typing
-from sklearn.gaussian_process.kernels import *
 import numpy as np
+from sklearn.gaussian_process.kernels import *
 from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 from matplotlib import cm
 
@@ -31,6 +32,10 @@ class Model(object):
         self.rng = np.random.default_rng(seed=0)
 
         # TODO: Add custom initialization for your model here if necessary
+        self.kernel = WhiteKernel() + Matern(1.0, (1e-5, 1e4), nu=2.5) 
+        self.gpr    = GaussianProcessRegressor(kernel=self.kernel, 
+                                               random_state=0, 
+                                               normalize_y=True)
 
     def make_predictions(self, test_x_2D: np.ndarray, test_x_AREA: np.ndarray) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -43,12 +48,10 @@ class Model(object):
         """
 
         # TODO: Use your GP to estimate the posterior mean and stddev for each city_area here
-        gp_mean = np.zeros(test_x_2D.shape[0], dtype=float)
-        gp_std = np.zeros(test_x_2D.shape[0], dtype=float)
         gp_mean, gp_std = self.gpr.predict(test_x_2D, return_std=True)
+        
         # TODO: Use the GP posterior to form your predictions here
         predictions = gp_mean
-
         return predictions, gp_mean, gp_std
 
     def fitting_model(self, train_y: np.ndarray,train_x_2D: np.ndarray):
@@ -57,10 +60,29 @@ class Model(object):
         :param train_x_2D: Training features as a 2d NumPy float array of shape (NUM_SAMPLES, 2)
         :param train_y: Training pollution concentrations as a 1d NumPy float array of shape (NUM_SAMPLES,)
         """
-
+        # Undersample samples based on k-Means clustering
+        train_x_2D, train_y = cluster_undersample(train_x_2D, train_y)
         # TODO: Fit your model here
-        kernel   = DotProduct() + WhiteKernel()
-        self.gpr = GaussianProcessRegressor(kernel=kernel, random_state=0).fit(train_x_2D, train_y)
+        self.gpr.fit(train_x_2D, train_y)
+
+
+def cluster_undersample(train_x_2D, train_y, n_clusters=1000):
+    """
+    k-means clustering based undersampling. From every cluster the mean value is taken, 
+    the number of samples will equal k (number of clusters).
+    :param train_x_2D: Training features as a 2d NumPy float array of shape (NUM_SAMPLES, 2)
+    :param train_y: Training pollution concentrations as a 1d NumPy float array of shape (NUM_SAMPLES,)
+    :k: number of clusters
+    """
+    kmeans = KMeans(n_clusters=n_clusters, random_state=0, n_init="auto").fit(train_x_2D)
+    
+    train_y_usamp = np.zeros(n_clusters)
+    for k in range(n_clusters):
+        train_y_usamp[k] = train_y[kmeans.labels_ == k].mean()        
+    train_x_usamp = kmeans.cluster_centers_  
+    
+    return train_x_usamp, train_y_usamp
+
 
 # You don't have to change this function
 def cost_function(ground_truth: np.ndarray, predictions: np.ndarray, AREA_idxs: np.ndarray) -> float:
@@ -197,27 +219,7 @@ def main():
     train_y = np.loadtxt('train_y.csv', delimiter=',', skiprows=1)
     test_x = np.loadtxt('test_x.csv', delimiter=',', skiprows=1)
 
-    #========================================================================================================
-    ## Undersample training data
-    # RANDOM
-    def random_undersample(train_x, train_y, n_samples):
-        ## Random Undersampling 
-        train_comb = np.hstack((train_x, train_y[:, np.newaxis]))
-        # Shuffle the rows
-        np.random.shuffle(train_comb)
-        # Take the first n_samples rows
-        train_undersampled = train_comb[:n_samples, :]
-        # Split them back into data and target
-        train_x_usam = train_undersampled[:, :-1]
-        train_y_usam = train_undersampled[:, -1]
-        return train_x_usam, train_y_usam
-    
 
-    undersample = True#input('Perform Undersampling? (True/False)')
-    if undersample:
-        print('Undersample')
-        train_x, train_y = random_undersample(train_x=train_x, train_y=train_y, n_samples=1000)
-    #========================================================================================================
 
     # Extract the city_area information
     train_x_2D, train_x_AREA, test_x_2D, test_x_AREA = extract_city_area_information(train_x, test_x)
