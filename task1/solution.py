@@ -212,7 +212,6 @@ def main():
         train_y_usam = train_undersampled[:, -1]
         return train_x_usam, train_y_usam
     
-
     undersample = True#input('Perform Undersampling? (True/False)')
     if undersample:
         print('Undersample')
