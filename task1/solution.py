@@ -45,7 +45,7 @@ class Model(object):
         # TODO: Use your GP to estimate the posterior mean and stddev for each city_area here
         gp_mean = np.zeros(test_x_2D.shape[0], dtype=float)
         gp_std = np.zeros(test_x_2D.shape[0], dtype=float)
-
+        gp_mean, gp_std = self.gpr.predict(test_x_2D, return_std=True)
         # TODO: Use the GP posterior to form your predictions here
         predictions = gp_mean
 
@@ -59,7 +59,8 @@ class Model(object):
         """
 
         # TODO: Fit your model here
-        pass
+        kernel   = DotProduct() + WhiteKernel()
+        self.gpr = GaussianProcessRegressor(kernel=kernel, random_state=0).fit(train_x_2D, train_y)
 
 # You don't have to change this function
 def cost_function(ground_truth: np.ndarray, predictions: np.ndarray, AREA_idxs: np.ndarray) -> float:
@@ -172,12 +173,16 @@ def extract_city_area_information(train_x: np.ndarray, test_x: np.ndarray) -> ty
     :return: Tuple of (training features' 2D coordinates, training features' city_area information,
         test features' 2D coordinates, test features' city_area information)
     """
-    train_x_2D = np.zeros((train_x.shape[0], 2), dtype=float)
-    train_x_AREA = np.zeros((train_x.shape[0],), dtype=bool)
-    test_x_2D = np.zeros((test_x.shape[0], 2), dtype=float)
-    test_x_AREA = np.zeros((test_x.shape[0],), dtype=bool)
+    # train_x_2D = np.zeros((train_x.shape[0], 2), dtype=float)
+    # train_x_AREA = np.zeros((train_x.shape[0],), dtype=bool)
+    # test_x_2D = np.zeros((test_x.shape[0], 2), dtype=float)
+    # test_x_AREA = np.zeros((test_x.shape[0],), dtype=bool)
 
     #TODO: Extract the city_area information from the training and test features
+    train_x_2D   = train_x[:,0:2]
+    train_x_AREA = train_x[:,2]  
+    test_x_2D    = test_x[:,0:2]
+    test_x_AREA  = test_x[:,2]
 
     assert train_x_2D.shape[0] == train_x_AREA.shape[0] and test_x_2D.shape[0] == test_x_AREA.shape[0]
     assert train_x_2D.shape[1] == 2 and test_x_2D.shape[1] == 2
@@ -191,6 +196,28 @@ def main():
     train_x = np.loadtxt('train_x.csv', delimiter=',', skiprows=1)
     train_y = np.loadtxt('train_y.csv', delimiter=',', skiprows=1)
     test_x = np.loadtxt('test_x.csv', delimiter=',', skiprows=1)
+
+    #========================================================================================================
+    ## Undersample training data
+    # RANDOM
+    def random_undersample(train_x, train_y, n_samples):
+        ## Random Undersampling 
+        train_comb = np.hstack((train_x, train_y[:, np.newaxis]))
+        # Shuffle the rows
+        np.random.shuffle(train_comb)
+        # Take the first n_samples rows
+        train_undersampled = train_comb[:n_samples, :]
+        # Split them back into data and target
+        train_x_usam = train_undersampled[:, :-1]
+        train_y_usam = train_undersampled[:, -1]
+        return train_x_usam, train_y_usam
+    
+
+    undersample = True#input('Perform Undersampling? (True/False)')
+    if undersample:
+        print('Undersample')
+        train_x, train_y = random_undersample(train_x=train_x, train_y=train_y, n_samples=1000)
+    #========================================================================================================
 
     # Extract the city_area information
     train_x_2D, train_x_AREA, test_x_2D, test_x_AREA = extract_city_area_information(train_x, test_x)
