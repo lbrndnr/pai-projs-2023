@@ -51,8 +51,13 @@ class Model(object):
         gp_mean, gp_std = self.gpr.predict(test_x_2D, return_std=True)
         
         # TODO: Use the GP posterior to form your predictions here
-        predictions = gp_mean
-        return predictions, gp_mean, gp_std
+        preds = gp_mean
+
+        # for the candidate areas, increase the estimate in the 95% confidence range in order to avoid underprediction.=
+        candidate_mask = test_x_AREA.astype(np.bool)
+        preds[candidate_mask] += gp_std[candidate_mask]
+
+        return preds, gp_mean, gp_std
 
     def fitting_model(self, train_y: np.ndarray,train_x_2D: np.ndarray):
         """
@@ -202,7 +207,7 @@ def extract_city_area_information(train_x: np.ndarray, test_x: np.ndarray) -> ty
 
     #TODO: Extract the city_area information from the training and test features
     train_x_2D   = train_x[:,0:2]
-    train_x_AREA = train_x[:,2]  
+    train_x_AREA = train_x[:,2]
     test_x_2D    = test_x[:,0:2]
     test_x_AREA  = test_x[:,2]
 
