@@ -32,7 +32,7 @@ class Model(object):
         self.rng = np.random.default_rng(seed=0)
 
         # TODO: Add custom initialization for your model here if necessary
-        self.kernel = WhiteKernel() + Matern(1.0, (1e-5, 1e4), nu=2.5) 
+        self.kernel = WhiteKernel() + Matern(1.0) 
         self.gpr    = GaussianProcessRegressor(kernel=self.kernel, 
                                                random_state=0, 
                                                normalize_y=True)
@@ -53,9 +53,9 @@ class Model(object):
         # TODO: Use the GP posterior to form your predictions here
         preds = gp_mean
 
-        # for the candidate areas, increase the estimate in the 95% confidence range in order to avoid underprediction.=
+        # for the candidate areas, increase the estimate in the 95% confidence range in order to avoid underprediction.
         candidate_mask = test_x_AREA.astype(np.bool)
-        preds[candidate_mask] += gp_std[candidate_mask]
+        preds[candidate_mask] += 1.5 * gp_std[candidate_mask]
 
         return preds, gp_mean, gp_std
 
@@ -66,7 +66,7 @@ class Model(object):
         :param train_y: Training pollution concentrations as a 1d NumPy float array of shape (NUM_SAMPLES,)
         """
         # Undersample samples based on k-Means clustering
-        train_x_2D, train_y = cluster_undersample(train_x_2D, train_y)
+        train_x_2D, train_y = cluster_undersample(train_x_2D, train_y, n_clusters=7000)
         # TODO: Fit your model here
         self.gpr.fit(train_x_2D, train_y)
 
