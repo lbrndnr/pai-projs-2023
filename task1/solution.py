@@ -3,7 +3,7 @@ import typing
 import numpy as np
 from sklearn.gaussian_process.kernels import *
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, Birch, AgglomerativeClustering
 import matplotlib.pyplot as plt
 from matplotlib import cm
 
@@ -32,7 +32,7 @@ class Model(object):
         self.rng = np.random.default_rng(seed=0)
 
         # TODO: Add custom initialization for your model here if necessary
-        self.kernel = WhiteKernel() + Matern(1.0) 
+        self.kernel = WhiteKernel() + Matern() #+ DotProduct() ** 2
         self.gpr    = GaussianProcessRegressor(kernel=self.kernel, 
                                                random_state=0, 
                                                normalize_y=True)
@@ -66,12 +66,12 @@ class Model(object):
         :param train_y: Training pollution concentrations as a 1d NumPy float array of shape (NUM_SAMPLES,)
         """
         # Undersample samples based on k-Means clustering
-        train_x_2D, train_y = cluster_undersample(train_x_2D, train_y, n_clusters=7000)
+        train_x_2D, train_y = cluster_undersample(train_x_2D, train_y, n_clusters=7000, algo="ward")
         # TODO: Fit your model here
         self.gpr.fit(train_x_2D, train_y)
 
 
-def cluster_undersample(train_x_2D, train_y, n_clusters=5000):
+def cluster_undersample(train_x_2D, train_y, n_clusters=5000, algo="kmeans"):
     """
     k-means clustering based undersampling. From every cluster the mean value is taken, 
     the number of samples will equal k (number of clusters).
@@ -79,14 +79,38 @@ def cluster_undersample(train_x_2D, train_y, n_clusters=5000):
     :param train_y: Training pollution concentrations as a 1d NumPy float array of shape (NUM_SAMPLES,)
     :k: number of clusters
     """
-    kmeans = KMeans(n_clusters=n_clusters, random_state=0, n_init="auto").fit(train_x_2D)
+    if algo == "birch":
+        birch = Birch(n_clusters=n_clusters, threshold=0.001).fit(train_x_2D)
+
+        train_x_usamp = np.zeros((n_clusters, 2))
+        train_y_usamp = np.zeros(n_clusters)
+        for k in range(n_clusters):
+            mask = (birch.labels_ == k)
+            train_x_usamp[k] = train_x_2D[mask].mean(axis=0)
+            train_y_usamp[k] = train_y[mask].mean()        
+        
+        return train_x_usamp, train_y_usamp
     
-    train_y_usamp = np.zeros(n_clusters)
-    for k in range(n_clusters):
-        train_y_usamp[k] = train_y[kmeans.labels_ == k].mean()        
-    train_x_usamp = kmeans.cluster_centers_  
-    
-    return train_x_usamp, train_y_usamp
+    elif algo == "ward":
+        ward = AgglomerativeClustering(n_clusters=n_clusters).fit(train_x_2D)
+
+        train_x_usamp = np.zeros((n_clusters, 2))
+        train_y_usamp = np.zeros(n_clusters)
+        for k in range(n_clusters):
+            mask = (ward.labels_ == k)
+            train_x_usamp[k] = train_x_2D[mask].mean(axis=0)
+            train_y_usamp[k] = train_y[mask].mean()        
+        
+        return train_x_usamp, train_y_usamp
+    else:
+        kmeans = KMeans(n_clusters=n_clusters, random_state=0, n_init="auto").fit(train_x_2D)
+        
+        train_y_usamp = np.zeros(n_clusters)
+        for k in range(n_clusters):
+            train_y_usamp[k] = train_y[kmeans.labels_ == k].mean()        
+        train_x_usamp = kmeans.cluster_centers_  
+        
+        return train_x_usamp, train_y_usamp
 
 
 # You don't have to change this function
