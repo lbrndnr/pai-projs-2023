@@ -9,7 +9,7 @@ from matplotlib import cm
 
 
 # Set `EXTENDED_EVALUATION` to `True` in order to visualize your predictions.
-EXTENDED_EVALUATION = False
+EXTENDED_EVALUATION = True
 EVALUATION_GRID_POINTS = 300  # Number of grid points used in extended evaluation
 
 # Cost function constants
@@ -79,6 +79,7 @@ def cluster_undersample(train_x_2D, train_y, n_clusters=5000):
     :param train_y: Training pollution concentrations as a 1d NumPy float array of shape (NUM_SAMPLES,)
     :k: number of clusters
     """
+    n_clusters = min(n_clusters, train_y.shape[0])
     kmeans = KMeans(n_clusters=n_clusters, random_state=0, n_init="auto").fit(train_x_2D)
     
     train_y_usamp = np.zeros(n_clusters)
