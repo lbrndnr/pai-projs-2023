@@ -153,12 +153,14 @@ class SWAGInference(object):
         #  as a dictionary that maps from weight name to values.
         #  Hint: you never need to consider the full vector of weights,
         #  but can always act on per-layer weights (in the format that _create_weight_copy() returns)
+        self.swag_num_models = 0
         self.swag_param_avg = self._create_weight_copy()
         self.swag_param2_avg = self._create_weight_copy()
 
         # Full SWAG
         # TODO(2): create attributes for SWAG-diagonal
         #  Hint: check collections.deque
+        self.swag_dev = {name: collections.deque(maxlen=self.deviation_matrix_max_rank) for name in self.swag_param_avg.keys()}
 
         # Calibration, prediction, and other attributes
         # TODO(2): create additional attributes, e.g., for calibration
@@ -175,8 +177,8 @@ class SWAGInference(object):
         # SWAG-diagonal
         for name, param in current_params.items():
             # TODO(1): update SWAG-diagonal attributes for weight `name` using `current_params` and `param`
-            self.swag_param_avg[name] = (self.swag_update_freq * self.swag_param_avg[name] + param) / (self.swag_update_freq + 1)
-            self.swag_param2_avg[name] = (self.swag_update_freq * self.swag_param2_avg[name] + param * param) / (self.swag_update_freq + 1)
+            self.swag_param_avg[name] = (self.swag_num_models * self.swag_param_avg[name] + param) / (self.swag_num_models + 1)
+            self.swag_param2_avg[name] = (self.swag_num_models * self.swag_param2_avg[name] + param * param) / (self.swag_num_models + 1)
 
         # Full SWAG
         if self.inference_mode == InferenceMode.SWAG_FULL:
@@ -245,7 +247,9 @@ class SWAGInference(object):
                     pbar.set_postfix(pbar_dict)
 
                 # TODO(1): Implement periodic SWAG updates using the attributes defined in __init__
-                if (epoch % self.swag_update_freq) == 0:
+                # we do epoch + 1 s.t. we're consistent with Algo 1 in the paper
+                if ((epoch + 1) % self.swag_update_freq) == 0:
+                    self.swag_num_models = (epoch + 1) / self.swag_update_freq
                     self.update_swag()
 
     def calibrate(self, validation_data: torch.utils.data.Dataset) -> None:
@@ -328,11 +332,10 @@ class SWAGInference(object):
             # SWAG-diagonal part
             z_1 = torch.randn(param.size())
             # TODO(1): Sample parameter values for SWAG-diagonal
+            # Paper takes the diag of this matrix, but dunno what diag of a 4D tensor looks like
+            # According to very last line of Algo 1 of paper, this should be correct
             current_mean = self.swag_param_avg[name]
             current_std = self.swag_param2_avg[name] - current_mean * current_mean
-
-            # Paper takes the diag of this matrix, but dunno what diag of a 4D tensor looks like
-            # current_std = torch.diag(current_std) 
 
             assert current_mean.size() == param.size() and current_std.size() == param.size()
 
