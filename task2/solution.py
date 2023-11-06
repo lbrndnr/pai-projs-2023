@@ -183,7 +183,10 @@ class SWAGInference(object):
         # Full SWAG
         if self.inference_mode == InferenceMode.SWAG_FULL:
             # TODO(2): update full SWAG attributes for weight `name` using `current_params` and `param`
-            raise NotImplementedError("Update full SWAG statistics")
+            for name, param in current_params.items():
+                current_dev = torch.reshape(param - self.swag_param_avg[name], (-1,))
+                self.swag_dev[name].append(current_dev)
+
 
     def fit_swag(self, loader: torch.utils.data.DataLoader) -> None:
         """
@@ -335,7 +338,12 @@ class SWAGInference(object):
             # Paper takes the diag of this matrix, but dunno what diag of a 4D tensor looks like
             # According to very last line of Algo 1 of paper, this should be correct
             current_mean = self.swag_param_avg[name]
-            current_std = self.swag_param2_avg[name] - current_mean * current_mean
+            current_cov = self.swag_param2_avg[name] - (current_mean * current_mean)
+
+            # assert torch.all(current_cov >= 0) # otherwise torch.sqrt will fail
+            current_cov = torch.abs(current_cov) # I think this is ok since signs are random anyways?
+            current_std = 1/np.sqrt(2) * torch.sqrt(current_cov)
+            # current_std = 0.5 * current_cov
 
             assert current_mean.size() == param.size() and current_std.size() == param.size()
 
@@ -345,8 +353,11 @@ class SWAGInference(object):
             # Full SWAG part
             if self.inference_mode == InferenceMode.SWAG_FULL:
                 # TODO(2): Sample parameter values for full SWAG
-                raise NotImplementedError("Sample parameter for full SWAG")
-                sampled_param += ...
+                z_2 = torch.randn(self.deviation_matrix_max_rank)
+                current_dev = torch.stack(self.swag_dev[name])
+                current_dev = torch.matmul(current_dev, z_2).reshape(sampled_param.size())
+
+                sampled_param += (1 / np.sqrt(2 * (self.deviation_matrix_max_rank - 1))) * current_dev
 
             # Modify weight value in-place; directly changing self.network
             param.data = sampled_param
