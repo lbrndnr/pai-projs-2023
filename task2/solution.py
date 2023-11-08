@@ -15,7 +15,7 @@ from matplotlib import pyplot as plt
 
 from util import draw_reliability_diagram, cost_function, setup_seeds, calc_calibration_curve
 
-EXTENDED_EVALUATION = False
+EXTENDED_EVALUATION = True
 """
 Set `EXTENDED_EVALUATION` to `True` in order to generate additional plots on validation data.
 """
@@ -113,7 +113,7 @@ class SWAGInference(object):
         model_dir: pathlib.Path,
         # TODO(1): change inference_mode to InferenceMode.SWAG_DIAGONAL
         # TODO(2): change inference_mode to InferenceMode.SWAG_FULL
-        inference_mode: InferenceMode = InferenceMode.SWAG_FULL,
+        inference_mode: InferenceMode = InferenceMode.SWAG_DIAGONAL,
         # TODO(2): optionally add/tweak hyperparameters
         swag_epochs: int = 30,
         swag_learning_rate: float = 0.045,
@@ -179,11 +179,22 @@ class SWAGInference(object):
             # TODO(1): update SWAG-diagonal attributes for weight `name` using `current_params` and `param`
             denom = (self.swag_num_models + 1)
             self.swag_param_avg[name] = self.swag_param_avg[name] * self.swag_num_models / denom + param / denom
-            self.swag_param2_avg[name] = self.swag_param2_avg[name] * self.swag_num_models / denom + param ** 2 / denom
+            self.swag_param2_avg[name] = self.swag_param2_avg[name] * self.swag_num_models / denom + (param ** 2) / denom
 
-            current_cov = self.swag_param2_avg[name] - self.swag_param_avg[name] ** 2
-            assert(torch.all(current_cov >= 0))
+            # self.swag_thetas[name].append(torch.clone(param))
+
+            # current_mean = torch.stack(self.swag_thetas[name])
+            # current_mean = torch.mean(current_mean, 0)
+            # diff = torch.abs(self.swag_param_avg[name] - current_mean)
+            # if torch.count_nonzero(diff > 1e-20) > 1:
+            #     print(name, torch.count_nonzero(diff > 1e-20))
+            #     print(self.swag_thetas[name])
+            #     print(self.swag_num_models)
+            #     print(self.swag_param_avg[name])
+
+            # current_cov = self.swag_param2_avg[name] - self.swag_param_avg[name] ** 2
             # print(name, torch.min(current_cov), torch.count_nonzero(current_cov <= 0))
+            # assert(torch.all(current_cov >= 0))
 
         # Full SWAG
         if self.inference_mode == InferenceMode.SWAG_FULL:
@@ -224,11 +235,10 @@ class SWAGInference(object):
         )
 
         # TODO(1): Perform initialization for SWAG fitting
-        # self.swag_param_avg = {name: param.detach() for name, param in self.network.named_parameters()}
-        # self.swag_param2_avg = {name: param * param for name, param in self.swag_param_avg.items() }
-        self.swag_param_avg = self._create_weight_copy()
-        self.swag_param2_avg = self._create_weight_copy()
+        self.swag_param_avg = {name: torch.clone(param.detach()) for name, param in self.network.named_parameters()}
+        self.swag_param2_avg = {name: param ** 2 for name, param in self.swag_param_avg.items() }
         self.swag_dev = {name: param.new_empty((0, param.numel())).zero_() for name, param in self.swag_param_avg.items() }
+        # self.swag_thetas = {name: [torch.clone(self.swag_param_avg[name])] for name, _ in self.network.named_parameters() }
 
         self.network.train()
         with tqdm.trange(self.swag_epochs, desc="Running gradient descent for SWA") as pbar:
@@ -312,7 +322,9 @@ class SWAGInference(object):
             #  and add the predictions to per_model_sample_predictions
             model_sample_predictions = []
             for (batch_xs,) in loader:
-                model_sample_predictions.append(self.network(batch_xs))
+                batch_ys = self.network(batch_xs)
+                batch_ys = torch.softmax(batch_ys, dim=-1)
+                model_sample_predictions.append(batch_ys)
 
             model_sample_predictions = torch.cat(model_sample_predictions)
             per_model_sample_predictions.append(model_sample_predictions)
@@ -326,9 +338,7 @@ class SWAGInference(object):
         )
 
         # TODO(1): Average predictions from different model samples into bma_probabilities
-        bma_probabilities = torch.stack(per_model_sample_predictions)
-        bma_probabilities = torch.mean(bma_probabilities, 0)
-        bma_probabilities = torch.softmax(bma_probabilities, dim=-1)
+        bma_probabilities = sum(per_model_sample_predictions) / self.bma_samples
 
         assert bma_probabilities.dim() == 2 and bma_probabilities.size(1) == 6  # N x C
         return bma_probabilities
@@ -345,13 +355,23 @@ class SWAGInference(object):
             # SWAG-diagonal part
             z_1 = torch.randn(param.size())
             # TODO(1): Sample parameter values for SWAG-diagonal
-            # Paper takes the diag of this matrix, but dunno what diag of a 4D tensor looks like
-            # According to very last line of Algo 1 of paper, this should be correct
             current_mean = self.swag_param_avg[name]
             current_var = self.swag_param2_avg[name] - current_mean ** 2
 
+            # current_mean = torch.stack(self.swag_thetas[name])
+            # current_mean = torch.mean(current_mean, 0)
+
+            # current_var = torch.stack(self.swag_thetas[name])
+            # current_var = torch.var(current_var, 0)
+
+            if torch.count_nonzero(current_var <= 0) > 0:
+                print(name, torch.min(current_var), torch.count_nonzero(current_var <= 0))
+
             current_var = torch.clamp(current_var, 1e-30) # clamp so that sqrt won't fail
-            current_std = 0.5 * torch.sqrt(current_var)
+
+            # according to the paper, we'd have to apply a scale of 1/sqrt(2) but scale = 1 is actually better??
+            current_std = torch.sqrt(current_var)
+            # current_std = 1/np.sqrt(2) * torch.sqrt(current_var) 
 
             assert current_mean.size() == param.size() and current_std.size() == param.size()
 
