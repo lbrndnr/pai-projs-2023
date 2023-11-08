@@ -113,7 +113,7 @@ class SWAGInference(object):
         model_dir: pathlib.Path,
         # TODO(1): change inference_mode to InferenceMode.SWAG_DIAGONAL
         # TODO(2): change inference_mode to InferenceMode.SWAG_FULL
-        inference_mode: InferenceMode = InferenceMode.SWAG_DIAGONAL,
+        inference_mode: InferenceMode = InferenceMode.SWAG_FULL,
         # TODO(2): optionally add/tweak hyperparameters
         swag_epochs: int = 30,
         swag_learning_rate: float = 0.045,
@@ -160,7 +160,7 @@ class SWAGInference(object):
         # Full SWAG
         # TODO(2): create attributes for SWAG-diagonal
         #  Hint: check collections.deque
-        self.swag_dev = {name: collections.deque(maxlen=self.deviation_matrix_max_rank) for name in self.swag_param_avg.keys()}
+        self.swag_dev = self._create_weight_copy()
 
         # Calibration, prediction, and other attributes
         # TODO(2): create additional attributes, e.g., for calibration
@@ -177,15 +177,22 @@ class SWAGInference(object):
         # SWAG-diagonal
         for name, param in current_params.items():
             # TODO(1): update SWAG-diagonal attributes for weight `name` using `current_params` and `param`
-            self.swag_param_avg[name] = (self.swag_num_models * self.swag_param_avg[name] + param) / (self.swag_num_models + 1)
-            self.swag_param2_avg[name] = (self.swag_num_models * self.swag_param2_avg[name] + param * param) / (self.swag_num_models + 1)
+            denom = (self.swag_num_models + 1)
+            self.swag_param_avg[name] = self.swag_param_avg[name] * self.swag_num_models / denom + param / denom
+            self.swag_param2_avg[name] = self.swag_param2_avg[name] * self.swag_num_models / denom + param ** 2 / denom
+
+            current_cov = self.swag_param2_avg[name] - self.swag_param_avg[name] ** 2
+            assert(torch.all(current_cov >= 0))
+            # print(name, torch.min(current_cov), torch.count_nonzero(current_cov <= 0))
 
         # Full SWAG
         if self.inference_mode == InferenceMode.SWAG_FULL:
             # TODO(2): update full SWAG attributes for weight `name` using `current_params` and `param`
             for name, param in current_params.items():
-                current_dev = torch.reshape(param - self.swag_param_avg[name], (-1,))
-                self.swag_dev[name].append(current_dev)
+                current_dev = (param - self.swag_param_avg[name]).view(-1, 1).t()
+                self.swag_dev[name] = torch.cat((self.swag_dev[name], current_dev), dim=0)
+                if self.swag_dev[name].size(0) > self.deviation_matrix_max_rank:
+                    self.swag_dev[name] = self.swag_dev[name][1:, :]
 
 
     def fit_swag(self, loader: torch.utils.data.DataLoader) -> None:
@@ -217,8 +224,11 @@ class SWAGInference(object):
         )
 
         # TODO(1): Perform initialization for SWAG fitting
-        self.swag_param_avg = {name: param.detach() for name, param in self.network.named_parameters()}
-        self.swag_param2_avg = {name: param * param for name, param in self.swag_param_avg.items() }
+        # self.swag_param_avg = {name: param.detach() for name, param in self.network.named_parameters()}
+        # self.swag_param2_avg = {name: param * param for name, param in self.swag_param_avg.items() }
+        self.swag_param_avg = self._create_weight_copy()
+        self.swag_param2_avg = self._create_weight_copy()
+        self.swag_dev = {name: param.new_empty((0, param.numel())).zero_() for name, param in self.swag_param_avg.items() }
 
         self.network.train()
         with tqdm.trange(self.swag_epochs, desc="Running gradient descent for SWA") as pbar:
@@ -338,12 +348,10 @@ class SWAGInference(object):
             # Paper takes the diag of this matrix, but dunno what diag of a 4D tensor looks like
             # According to very last line of Algo 1 of paper, this should be correct
             current_mean = self.swag_param_avg[name]
-            current_cov = self.swag_param2_avg[name] - (current_mean * current_mean)
+            current_var = self.swag_param2_avg[name] - current_mean ** 2
 
-            # assert torch.all(current_cov >= 0) # otherwise torch.sqrt will fail
-            current_cov = torch.abs(current_cov) # I think this is ok since signs are random anyways?
-            current_std = 1/np.sqrt(2) * torch.sqrt(current_cov)
-            # current_std = 0.5 * current_cov
+            current_var = torch.clamp(current_var, 1e-30) # clamp so that sqrt won't fail
+            current_std = 0.5 * torch.sqrt(current_var)
 
             assert current_mean.size() == param.size() and current_std.size() == param.size()
 
@@ -353,11 +361,10 @@ class SWAGInference(object):
             # Full SWAG part
             if self.inference_mode == InferenceMode.SWAG_FULL:
                 # TODO(2): Sample parameter values for full SWAG
-                z_2 = torch.randn(self.deviation_matrix_max_rank)
-                current_dev = torch.stack(self.swag_dev[name])
-                current_dev = torch.matmul(current_dev, z_2).reshape(sampled_param.size())
+                current_dev = self.swag_dev[name]
+                z_2 = torch.randn((current_dev.size(0), 1))
 
-                sampled_param += (1 / np.sqrt(2 * (self.deviation_matrix_max_rank - 1))) * current_dev
+                sampled_param += (1 / np.sqrt(2 * (self.deviation_matrix_max_rank - 1))) * current_dev.t().matmul(z_2).view_as(current_mean)
 
             # Modify weight value in-place; directly changing self.network
             param.data = sampled_param
