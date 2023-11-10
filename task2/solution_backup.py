@@ -31,7 +31,6 @@ Note that MAP inference can take a long time.
 
 
 def main():
-    """
     raise RuntimeError(
         "This main() method is for illustrative purposes only"
         " and will NEVER be called when running your solution to generate your submission file!\n"
@@ -39,7 +38,6 @@ def main():
         "You can remove this exception for local testing, but be aware that any changes to the main() method"
         " are ignored when generating your submission file."
     )
-    """
 
     data_dir = pathlib.Path.cwd()
     model_dir = pathlib.Path.cwd()
@@ -115,19 +113,13 @@ class SWAGInference(object):
         model_dir: pathlib.Path,
         # TODO(1): change inference_mode to InferenceMode.SWAG_DIAGONAL
         # TODO(2): change inference_mode to InferenceMode.SWAG_FULL
-        #inference_mode: InferenceMode = InferenceMode.SWAG_DIAGONAL,
         inference_mode: InferenceMode = InferenceMode.SWAG_FULL,
         # TODO(2): optionally add/tweak hyperparameters
         swag_epochs: int = 30,
-        #swag_epochs: int = 5,
-        
-        bma_samples: int = 30,
-        #bma_samples: int = 5,
-        
         swag_learning_rate: float = 0.045,
         swag_update_freq: int = 1,
         deviation_matrix_max_rank: int = 15,
-        # {'swag_epochs': 30, 'bma_samples': 35, '_prediction_threshold': 0.6}
+        bma_samples: int = 30,
     ):
         """
         :param train_xs: Training images (for storage only)
@@ -366,15 +358,20 @@ class SWAGInference(object):
             current_mean = self.swag_param_avg[name]
             current_var = self.swag_param2_avg[name] - current_mean ** 2
 
+            # current_mean = torch.stack(self.swag_thetas[name])
+            # current_mean = torch.mean(current_mean, 0)
 
-            #if torch.count_nonzero(current_var <= 0) > 0:
-            #    print(name, torch.min(current_var), torch.count_nonzero(current_var <= 0))
+            # current_var = torch.stack(self.swag_thetas[name])
+            # current_var = torch.var(current_var, 0)
 
-            #current_var = torch.clamp(current_var, 1e-30) # clamp so that sqrt won't fail
+            if torch.count_nonzero(current_var <= 0) > 0:
+                print(name, torch.min(current_var), torch.count_nonzero(current_var <= 0))
+
+            current_var = torch.clamp(current_var, 1e-30) # clamp so that sqrt won't fail
 
             # according to the paper, we'd have to apply a scale of 1/sqrt(2) but scale = 1 is actually better??
-            #current_std = torch.sqrt(current_var)
-            current_std = 1/np.sqrt(2) * np.sqrt(current_var) 
+            current_std = torch.sqrt(current_var)
+            # current_std = 1/np.sqrt(2) * torch.sqrt(current_var) 
 
             assert current_mean.size() == param.size() and current_std.size() == param.size()
 
