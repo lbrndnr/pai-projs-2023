@@ -126,7 +126,7 @@ class SWAGInference(object):
         
         swag_learning_rate: float = 0.045,
         swag_update_freq: int = 1,
-        deviation_matrix_max_rank: int = 5,
+        deviation_matrix_max_rank: int = 15,
         # {'swag_epochs': 30, 'bma_samples': 35, '_prediction_threshold': 0.6}
     ):
         """
@@ -240,8 +240,6 @@ class SWAGInference(object):
             optimizer,
             epochs=self.swag_epochs,
             steps_per_epoch=len(loader),
-            #min_lr= 1e-5,
-            #max_lr= 0.01,
         )
 
         # TODO(1): Perform initialization for SWAG fitting
@@ -398,7 +396,7 @@ class SWAGInference(object):
         #  in the appropriate place!
         self._update_batchnorm()
 
-    def predict_labels(self, predicted_probabilities: torch.Tensor) -> torch.Tensor:
+    def predict_labels(self, predicted_probabilities: torch.Tensor, is_snow: torch.Tensor, is_cloud: torch.Tensor) -> torch.Tensor:
         """
         Predict labels in {0, 1, 2, 3, 4, 5} or "don't know" as -1
         based on your model's predicted probabilities.
@@ -410,19 +408,39 @@ class SWAGInference(object):
         # label_probabilities contains the per-row maximum values in predicted_probabilities,
         # max_likelihood_labels the corresponding column index (equivalent to class).
         label_probabilities, max_likelihood_labels = torch.max(predicted_probabilities, dim=-1)
+
+        #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+        # MAX: Classify as ambiguous if there is large snow or cloud cover
+        snow_cloud_threshold = 0.5  # threshold for snow/cloud cover ---> tuuuunnnneeeee
+        snow_cloud_ambiguous = (is_snow > snow_cloud_threshold) | (is_cloud > snow_cloud_threshold)
+        #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+        
+        
         num_samples, num_classes = predicted_probabilities.size()
         assert label_probabilities.size() == (num_samples,) and max_likelihood_labels.size() == (num_samples,)
+
+        #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+        # MAX: Return torch labels        
+        return torch.where(
+            snow_cloud_ambiguous, 
+            torch.ones_like(max_likelihood_labels) * -1, 
+            max_likelihood_labels)
+        #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
 
         # A model without uncertainty awareness might simply predict the most likely label per sample:
         # return max_likelihood_labels
 
         # A bit better: use a threshold to decide whether to return a label or "don't know" (label -1)
         # TODO(2): implement a different decision rule if desired
+        
+        
         return torch.where(
             label_probabilities >= self._prediction_threshold,
             max_likelihood_labels,
             torch.ones_like(max_likelihood_labels) * -1,
         )
+
+
 
     def _create_weight_copy(self) -> typing.Dict[str, torch.Tensor]:
         """Create an all-zero copy of the network weights as a dictionary that maps name -> weight"""
@@ -615,6 +633,7 @@ class SWAGInference(object):
         for module, momentum in old_momentum_parameters.items():
             module.momentum = momentum
 
+
 class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
     """
     Custom learning rate scheduler that calculates a different learning rate each gradient descent step.
@@ -623,21 +642,6 @@ class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
     and add+store additional attributes in __init__.
     You should not change any other parts of this class.
     """
-
-    # TODO(2): Add and store additional arguments if you decide to implement a custom scheduler
-    def __init__(
-        self,
-        optimizer: torch.optim.Optimizer,
-        epochs: int,
-        steps_per_epoch: int,
-        #min_lr: float = 1e-5,
-        #max_lr: float = 0.01,
-    ):
-        self.epochs = epochs
-        self.steps_per_epoch = steps_per_epoch
-        super().__init__(optimizer, last_epoch=-1, verbose=False)
-        #self.min_lr = min_lr
-        #self.max_lr = max_lr
 
     def calculate_lr(self, current_epoch: float, old_lr: float) -> float:
         """
@@ -650,23 +654,18 @@ class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
         This method should return a single float: the new learning rate.
         """
         # TODO(2): Implement a custom schedule if desired
-        # Linear decay
-        #step=0.05
-        #lr = self.min_lr + (self.start_lr - self.min_lr) * (1 - step / self.total_steps)
-        
-        minlr = 1e-4
-        maxlr = 0.1
-        # Cosine Annealing learning rate
-        x = 1 + math.cos(math.pi * current_epoch / self.epochs) / 2
-        lr = minlr + (maxlr - minlr) * x
-        
-        return max(lr, minlr)
-        
-        #return old_lr - 1e-5
+        return old_lr
 
-    #= = = = = = = = = = = = = = = = = = = = = = = = = = MAX = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
-
-
+    # TODO(2): Add and store additional arguments if you decide to implement a custom scheduler
+    def __init__(
+        self,
+        optimizer: torch.optim.Optimizer,
+        epochs: int,
+        steps_per_epoch: int,
+    ):
+        self.epochs = epochs
+        self.steps_per_epoch = steps_per_epoch
+        super().__init__(optimizer, last_epoch=-1, verbose=False)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
@@ -677,11 +676,6 @@ class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
             self.calculate_lr(self.last_epoch / self.steps_per_epoch, group["lr"])
             for group in self.optimizer.param_groups
         ]
-       
-    #= = = = = = = = = = = = = = = = = = = = = = = = = = MAX END = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
-
-
-
 
 
 def evaluate(
@@ -709,7 +703,7 @@ def evaluate(
     # and classes as predicted by your SWAG implementation.
     pred_prob_all = swag.predict_probabilities(xs)
     pred_prob_max, pred_ys_argmax = torch.max(pred_prob_all, dim=-1)
-    pred_ys = swag.predict_labels(pred_prob_all)
+    pred_ys = swag.predict_labels(pred_prob_all, is_snow, is_cloud)
 
     # Create a mask that ignores ambiguous samples (those with class -1)
     nonambiguous_mask = ys != -1
