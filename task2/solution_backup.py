@@ -31,7 +31,6 @@ Note that MAP inference can take a long time.
 
 
 def main():
-    """
     raise RuntimeError(
         "This main() method is for illustrative purposes only"
         " and will NEVER be called when running your solution to generate your submission file!\n"
@@ -39,7 +38,6 @@ def main():
         "You can remove this exception for local testing, but be aware that any changes to the main() method"
         " are ignored when generating your submission file."
     )
-    """
 
     data_dir = pathlib.Path.cwd()
     model_dir = pathlib.Path.cwd()
@@ -115,19 +113,13 @@ class SWAGInference(object):
         model_dir: pathlib.Path,
         # TODO(1): change inference_mode to InferenceMode.SWAG_DIAGONAL
         # TODO(2): change inference_mode to InferenceMode.SWAG_FULL
-        #inference_mode: InferenceMode = InferenceMode.SWAG_DIAGONAL,
         inference_mode: InferenceMode = InferenceMode.SWAG_FULL,
         # TODO(2): optionally add/tweak hyperparameters
         swag_epochs: int = 30,
-        #swag_epochs: int = 5,
-        
-        bma_samples: int = 30,
-        #bma_samples: int = 5,
-        
         swag_learning_rate: float = 0.045,
         swag_update_freq: int = 1,
-        deviation_matrix_max_rank: int = 5,
-        # {'swag_epochs': 30, 'bma_samples': 35, '_prediction_threshold': 0.6}
+        deviation_matrix_max_rank: int = 15,
+        bma_samples: int = 30,
     ):
         """
         :param train_xs: Training images (for storage only)
@@ -240,8 +232,6 @@ class SWAGInference(object):
             optimizer,
             epochs=self.swag_epochs,
             steps_per_epoch=len(loader),
-            #min_lr= 1e-5,
-            #max_lr= 0.01,
         )
 
         # TODO(1): Perform initialization for SWAG fitting
@@ -368,15 +358,20 @@ class SWAGInference(object):
             current_mean = self.swag_param_avg[name]
             current_var = self.swag_param2_avg[name] - current_mean ** 2
 
+            # current_mean = torch.stack(self.swag_thetas[name])
+            # current_mean = torch.mean(current_mean, 0)
 
-            #if torch.count_nonzero(current_var <= 0) > 0:
-            #    print(name, torch.min(current_var), torch.count_nonzero(current_var <= 0))
+            # current_var = torch.stack(self.swag_thetas[name])
+            # current_var = torch.var(current_var, 0)
 
-            #current_var = torch.clamp(current_var, 1e-30) # clamp so that sqrt won't fail
+            if torch.count_nonzero(current_var <= 0) > 0:
+                print(name, torch.min(current_var), torch.count_nonzero(current_var <= 0))
+
+            current_var = torch.clamp(current_var, 1e-30) # clamp so that sqrt won't fail
 
             # according to the paper, we'd have to apply a scale of 1/sqrt(2) but scale = 1 is actually better??
-            #current_std = torch.sqrt(current_var)
-            current_std = 1/np.sqrt(2) * np.sqrt(current_var) 
+            current_std = torch.sqrt(current_var)
+            # current_std = 1/np.sqrt(2) * torch.sqrt(current_var) 
 
             assert current_mean.size() == param.size() and current_std.size() == param.size()
 
@@ -615,6 +610,7 @@ class SWAGInference(object):
         for module, momentum in old_momentum_parameters.items():
             module.momentum = momentum
 
+
 class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
     """
     Custom learning rate scheduler that calculates a different learning rate each gradient descent step.
@@ -623,21 +619,6 @@ class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
     and add+store additional attributes in __init__.
     You should not change any other parts of this class.
     """
-
-    # TODO(2): Add and store additional arguments if you decide to implement a custom scheduler
-    def __init__(
-        self,
-        optimizer: torch.optim.Optimizer,
-        epochs: int,
-        steps_per_epoch: int,
-        #min_lr: float = 1e-5,
-        #max_lr: float = 0.01,
-    ):
-        self.epochs = epochs
-        self.steps_per_epoch = steps_per_epoch
-        super().__init__(optimizer, last_epoch=-1, verbose=False)
-        #self.min_lr = min_lr
-        #self.max_lr = max_lr
 
     def calculate_lr(self, current_epoch: float, old_lr: float) -> float:
         """
@@ -650,23 +631,18 @@ class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
         This method should return a single float: the new learning rate.
         """
         # TODO(2): Implement a custom schedule if desired
-        # Linear decay
-        #step=0.05
-        #lr = self.min_lr + (self.start_lr - self.min_lr) * (1 - step / self.total_steps)
-        
-        minlr = 1e-4
-        maxlr = 0.1
-        # Cosine Annealing learning rate
-        x = 1 + math.cos(math.pi * current_epoch / self.epochs) / 2
-        lr = minlr + (maxlr - minlr) * x
-        
-        return max(lr, minlr)
-        
-        #return old_lr - 1e-5
+        return old_lr
 
-    #= = = = = = = = = = = = = = = = = = = = = = = = = = MAX = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
-
-
+    # TODO(2): Add and store additional arguments if you decide to implement a custom scheduler
+    def __init__(
+        self,
+        optimizer: torch.optim.Optimizer,
+        epochs: int,
+        steps_per_epoch: int,
+    ):
+        self.epochs = epochs
+        self.steps_per_epoch = steps_per_epoch
+        super().__init__(optimizer, last_epoch=-1, verbose=False)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
@@ -677,11 +653,6 @@ class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
             self.calculate_lr(self.last_epoch / self.steps_per_epoch, group["lr"])
             for group in self.optimizer.param_groups
         ]
-       
-    #= = = = = = = = = = = = = = = = = = = = = = = = = = MAX END = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
-
-
-
 
 
 def evaluate(

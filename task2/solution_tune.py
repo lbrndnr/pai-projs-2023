@@ -12,6 +12,7 @@ import torch.optim
 import torch.utils.data
 import tqdm
 from matplotlib import pyplot as plt
+import itertools
 
 from util import draw_reliability_diagram, cost_function, setup_seeds, calc_calibration_curve
 
@@ -71,19 +72,65 @@ def main():
         shuffle=True,
         num_workers=0,
     )
-    swag = SWAGInference(
-        train_xs=dataset_train.tensors[0],
-        model_dir=model_dir,
-    )
-    swag.fit(train_loader)
-    swag.calibrate(dataset_val)
+
+    ## Grid-search for optimal hyperparams
+    hyperparameters = {
+        'swag_epochs'              : [30],
+        'bma_samples'              : [30],
+        'swag_learning_rate'       : [0.045],      #init=0.045
+        'swag_update_freq'         : [1],               #init=1 
+        'deviation_matrix_max_rank': [15],              # init=15, 
+        '_prediction_threshold'    : [2.0/3.0 ],
+    }
+
+
+    # Generate all combinations of hyperparameters and tranform to dict
+    hyperparam_combinations = list(itertools.product(*hyperparameters.values()))
+    hyperparam_dicts = [
+        dict(zip(hyperparameters, combination)) for combination in hyperparam_combinations
+    ]
+
+    best_hyparam = None
+    best_cost = float('inf')
+    iter=0
+    for hyperparams in hyperparam_dicts:
+        iter +=1
+        print(f'\n========================================================================================================')
+        print(f'Test hyperparams (iter {iter} of {len(hyperparam_combinations)}): {hyperparams}\n')
+        # Create a SWAGInference instance with the current set of hyperparameters
+        swag = SWAGInference(
+            train_xs=dataset_train.tensors[0],
+            model_dir=model_dir,
+            swag_epochs=hyperparams['swag_epochs'],
+            bma_samples=hyperparams['bma_samples'],
+            swag_learning_rate=hyperparams['swag_learning_rate'],
+            swag_update_freq=hyperparams['swag_update_freq'],
+            deviation_matrix_max_rank=hyperparams['deviation_matrix_max_rank'],
+            _prediction_threshold=hyperparams['_prediction_threshold'],
+
+        )
+
+        # Fit and evaluate the model
+        swag.fit(train_loader)
+        swag.calibrate(dataset_val)
+        
+        with torch.random.fork_rng():
+            cost = evaluate(swag, dataset_val, EXTENDED_EVALUATION, output_dir)
+
+        # Update the best hyperparameters if current performance is better
+        if cost < best_cost:
+            best_cost    = cost
+            best_hyparam = hyperparams
+            best_iter    = iter
+        print(f'========================================================================================================\n')
+
+    print(f"\nBest hyperparameters (iter={best_iter}): \n{best_hyparam}\n")
+
 
     # fork_rng ensures that the evaluation does not change the rng state.
     # That way, you should get exactly the same results even if you remove evaluation
     # to save computational time when developing the task
     # (as long as you ONLY use torch randomness, and not e.g. random or numpy.random).
-    with torch.random.fork_rng():
-        evaluate(swag, dataset_val, EXTENDED_EVALUATION, output_dir)
 
 
 class InferenceMode(enum.Enum):
@@ -117,17 +164,17 @@ class SWAGInference(object):
         # TODO(2): change inference_mode to InferenceMode.SWAG_FULL
         #inference_mode: InferenceMode = InferenceMode.SWAG_DIAGONAL,
         inference_mode: InferenceMode = InferenceMode.SWAG_FULL,
+        
         # TODO(2): optionally add/tweak hyperparameters
         swag_epochs: int = 30,
         #swag_epochs: int = 5,
-        
         bma_samples: int = 30,
         #bma_samples: int = 5,
         
         swag_learning_rate: float = 0.045,
         swag_update_freq: int = 1,
-        deviation_matrix_max_rank: int = 5,
-        # {'swag_epochs': 30, 'bma_samples': 35, '_prediction_threshold': 0.6}
+        deviation_matrix_max_rank: int = 15,
+        _prediction_threshold = 2.0 / 3.0,
     ):
         """
         :param train_xs: Training images (for storage only)
@@ -147,6 +194,7 @@ class SWAGInference(object):
         self.swag_update_freq = swag_update_freq
         self.deviation_matrix_max_rank = deviation_matrix_max_rank
         self.bma_samples = bma_samples
+        self._prediction_threshold = _prediction_threshold
 
         # Network used to perform SWAG.
         # Note that all operations in this class modify this network IN-PLACE!
@@ -172,7 +220,7 @@ class SWAGInference(object):
 
         # Calibration, prediction, and other attributes
         # TODO(2): create additional attributes, e.g., for calibration
-        self._prediction_threshold = None  # this is an example, feel free to be creative
+        #self._prediction_threshold = None  # this is an example, feel free to be creative
 
     def update_swag(self) -> None:
         """
@@ -240,8 +288,6 @@ class SWAGInference(object):
             optimizer,
             epochs=self.swag_epochs,
             steps_per_epoch=len(loader),
-            #min_lr= 1e-5,
-            #max_lr= 0.01,
         )
 
         # TODO(1): Perform initialization for SWAG fitting
@@ -298,7 +344,9 @@ class SWAGInference(object):
 
         # TODO(1): pick a prediction threshold, either constant or adaptive.
         #  The provided value should suffice to pass the easy baseline.
-        self._prediction_threshold = 2.0 / 3.0
+        #self._prediction_threshold = self._prediction_threshold
+        #self._prediction_threshold = 2.0 / 3.0
+
 
         # TODO(2): perform additional calibration if desired.
         #  Feel free to remove or change the prediction threshold.
@@ -369,10 +417,10 @@ class SWAGInference(object):
             current_var = self.swag_param2_avg[name] - current_mean ** 2
 
 
-            #if torch.count_nonzero(current_var <= 0) > 0:
-            #    print(name, torch.min(current_var), torch.count_nonzero(current_var <= 0))
+            if torch.count_nonzero(current_var <= 0) > 0:
+                print(name, torch.min(current_var), torch.count_nonzero(current_var <= 0))
 
-            #current_var = torch.clamp(current_var, 1e-30) # clamp so that sqrt won't fail
+            current_var = torch.clamp(current_var, 1e-30) # clamp so that sqrt won't fail
 
             # according to the paper, we'd have to apply a scale of 1/sqrt(2) but scale = 1 is actually better??
             #current_std = torch.sqrt(current_var)
@@ -615,6 +663,7 @@ class SWAGInference(object):
         for module, momentum in old_momentum_parameters.items():
             module.momentum = momentum
 
+
 class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
     """
     Custom learning rate scheduler that calculates a different learning rate each gradient descent step.
@@ -623,21 +672,6 @@ class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
     and add+store additional attributes in __init__.
     You should not change any other parts of this class.
     """
-
-    # TODO(2): Add and store additional arguments if you decide to implement a custom scheduler
-    def __init__(
-        self,
-        optimizer: torch.optim.Optimizer,
-        epochs: int,
-        steps_per_epoch: int,
-        #min_lr: float = 1e-5,
-        #max_lr: float = 0.01,
-    ):
-        self.epochs = epochs
-        self.steps_per_epoch = steps_per_epoch
-        super().__init__(optimizer, last_epoch=-1, verbose=False)
-        #self.min_lr = min_lr
-        #self.max_lr = max_lr
 
     def calculate_lr(self, current_epoch: float, old_lr: float) -> float:
         """
@@ -650,23 +684,18 @@ class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
         This method should return a single float: the new learning rate.
         """
         # TODO(2): Implement a custom schedule if desired
-        # Linear decay
-        #step=0.05
-        #lr = self.min_lr + (self.start_lr - self.min_lr) * (1 - step / self.total_steps)
-        
-        minlr = 1e-4
-        maxlr = 0.1
-        # Cosine Annealing learning rate
-        x = 1 + math.cos(math.pi * current_epoch / self.epochs) / 2
-        lr = minlr + (maxlr - minlr) * x
-        
-        return max(lr, minlr)
-        
-        #return old_lr - 1e-5
+        return old_lr
 
-    #= = = = = = = = = = = = = = = = = = = = = = = = = = MAX = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
-
-
+    # TODO(2): Add and store additional arguments if you decide to implement a custom scheduler
+    def __init__(
+        self,
+        optimizer: torch.optim.Optimizer,
+        epochs: int,
+        steps_per_epoch: int,
+    ):
+        self.epochs = epochs
+        self.steps_per_epoch = steps_per_epoch
+        super().__init__(optimizer, last_epoch=-1, verbose=False)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
@@ -677,11 +706,6 @@ class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
             self.calculate_lr(self.last_epoch / self.steps_per_epoch, group["lr"])
             for group in self.optimizer.param_groups
         ]
-       
-    #= = = = = = = = = = = = = = = = = = = = = = = = = = MAX END = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
-
-
-
 
 
 def evaluate(
@@ -788,6 +812,8 @@ def evaluate(
         fig.suptitle("Least confident predictions", size=20)
         fig.savefig(output_dir / "examples_least_confident.pdf")
 
+        return costs[best_idx]
+    
 
 class CNN(torch.nn.Module):
     """
