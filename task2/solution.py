@@ -296,7 +296,7 @@ class SWAGInference(object):
 
         # TODO(1): pick a prediction threshold, either constant or adaptive.
         #  The provided value should suffice to pass the easy baseline.
-        self._prediction_threshold = 0.64
+        self._prediction_threshold = 0.62
 
         # TODO(2): perform additional calibration if desired.
         #  Feel free to remove or change the prediction threshold.
