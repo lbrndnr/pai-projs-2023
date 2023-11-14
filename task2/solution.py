@@ -240,8 +240,6 @@ class SWAGInference(object):
             optimizer,
             epochs=self.swag_epochs,
             steps_per_epoch=len(loader),
-            #min_lr= 1e-5,
-            #max_lr= 0.01,
         )
 
         # TODO(1): Perform initialization for SWAG fitting
@@ -298,7 +296,7 @@ class SWAGInference(object):
 
         # TODO(1): pick a prediction threshold, either constant or adaptive.
         #  The provided value should suffice to pass the easy baseline.
-        self._prediction_threshold = 2.0 / 3.0
+        self._prediction_threshold = 0.64
 
         # TODO(2): perform additional calibration if desired.
         #  Feel free to remove or change the prediction threshold.
@@ -615,6 +613,7 @@ class SWAGInference(object):
         for module, momentum in old_momentum_parameters.items():
             module.momentum = momentum
 
+
 class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
     """
     Custom learning rate scheduler that calculates a different learning rate each gradient descent step.
@@ -623,21 +622,6 @@ class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
     and add+store additional attributes in __init__.
     You should not change any other parts of this class.
     """
-
-    # TODO(2): Add and store additional arguments if you decide to implement a custom scheduler
-    def __init__(
-        self,
-        optimizer: torch.optim.Optimizer,
-        epochs: int,
-        steps_per_epoch: int,
-        #min_lr: float = 1e-5,
-        #max_lr: float = 0.01,
-    ):
-        self.epochs = epochs
-        self.steps_per_epoch = steps_per_epoch
-        super().__init__(optimizer, last_epoch=-1, verbose=False)
-        #self.min_lr = min_lr
-        #self.max_lr = max_lr
 
     def calculate_lr(self, current_epoch: float, old_lr: float) -> float:
         """
@@ -650,23 +634,18 @@ class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
         This method should return a single float: the new learning rate.
         """
         # TODO(2): Implement a custom schedule if desired
-        # Linear decay
-        #step=0.05
-        #lr = self.min_lr + (self.start_lr - self.min_lr) * (1 - step / self.total_steps)
-        
-        minlr = 1e-4
-        maxlr = 0.1
-        # Cosine Annealing learning rate
-        x = 1 + math.cos(math.pi * current_epoch / self.epochs) / 2
-        lr = minlr + (maxlr - minlr) * x
-        
-        return max(lr, minlr)
-        
-        #return old_lr - 1e-5
+        return old_lr
 
-    #= = = = = = = = = = = = = = = = = = = = = = = = = = MAX = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
-
-
+    # TODO(2): Add and store additional arguments if you decide to implement a custom scheduler
+    def __init__(
+        self,
+        optimizer: torch.optim.Optimizer,
+        epochs: int,
+        steps_per_epoch: int,
+    ):
+        self.epochs = epochs
+        self.steps_per_epoch = steps_per_epoch
+        super().__init__(optimizer, last_epoch=-1, verbose=False)
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
@@ -677,11 +656,6 @@ class SWAGScheduler(torch.optim.lr_scheduler.LRScheduler):
             self.calculate_lr(self.last_epoch / self.steps_per_epoch, group["lr"])
             for group in self.optimizer.param_groups
         ]
-       
-    #= = = = = = = = = = = = = = = = = = = = = = = = = = MAX END = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = = 
-
-
-
 
 
 def evaluate(
