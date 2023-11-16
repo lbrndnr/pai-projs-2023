@@ -2,11 +2,20 @@
 import numpy as np
 from scipy.optimize import fmin_l_bfgs_b
 # import additional ...
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import Matern
+from sklearn.gaussian_process.kernels import DotProduct # linear
+from scipy.stats import norminvgauss
+
 
 
 # global variables
 DOMAIN = np.array([[0, 10]])  # restrict \theta in [0, 10]
 SAFETY_THRESHOLD = 4  # threshold, upper bound of SA
+n_iter = 10
+kernel_f = 1 * Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
+kernel_v = DotProduct() + Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
+lambda_1 = 2
 
 
 # TODO: implement a self-contained solution in the BO_algo class.
@@ -15,7 +24,18 @@ class BO_algo():
     def __init__(self):
         """Initializes the algorithm with a parameter configuration."""
         # TODO: Define all relevant class members for your BO algorithm here.
-        pass
+        # K: Empty list to fill with datapoints
+        x = []
+        v = []
+        f = []
+        # bioavailability (logP) in [0,1]
+        # Minimal synthetic acessiblity score (SA) --> high SA more difficult to synthesize
+        # self.x_init = 0 # initial point in domain
+        
+        self.n_iter = n_iter
+        self.gauss_pr_f = GaussianProcessRegressor(kernel = kernel_f) # target function? OR RBF kernel, add noise?
+        self.gauss_pr_v = GaussianProcessRegressor(kernel = kernel_v)
+
 
     def next_recommendation(self):
         """
@@ -31,7 +51,19 @@ class BO_algo():
         # In implementing this function, you may use
         # optimize_acquisition_function() defined below.
 
-        raise NotImplementedError
+        # raise NotImplementedError
+
+        # K TODO
+        # expected_v = self.gauss_pr_v.predict(self.x, return_std= False)
+
+        # check v
+
+       
+        # returns an optimal x
+        x_opt = self.optimize_acquisition_function()
+
+        
+
 
     def optimize_acquisition_function(self):
         """Optimizes the acquisition function defined below (DO NOT MODIFY).
@@ -70,7 +102,7 @@ class BO_algo():
         ----------
         x: np.ndarray
             x in domain of f, has shape (N, 1)
-
+ 
         Returns
         ------
         af_value: np.ndarray
@@ -79,7 +111,13 @@ class BO_algo():
         """
         x = np.atleast_2d(x)
         # TODO: Implement the acquisition function you want to optimize.
-        raise NotImplementedError
+        # raise NotImplementedError
+
+        # UCB
+        mean, std = self.gauss_pr_f.predict(x, return_std=True)
+        acq_fnct = mean + lambda_1*std
+
+        return acq_fnct
 
     def add_data_point(self, x: float, f: float, v: float):
         """
@@ -95,7 +133,22 @@ class BO_algo():
             SA constraint func
         """
         # TODO: Add the observed data {x, f, v} to your model.
-        raise NotImplementedError
+        # raise NotImplementedError
+        # Add the x,f and v to the model parameters
+
+        #self.x = np.vstack((self.x, [[x]]))
+        #self.f = np.vstack((self.f, [[f]]))
+        #self.v = np.vstack((self.v, [[v]]))
+
+        # K: Todo --> f,v definieren
+
+        self.x.append(x)
+        self.f.append(f)
+        self.v.append(v)
+
+        # Update the model with the new data
+        self.gauss_pr_f.fit(self.x, self.f)
+        self.gauss_pr_v.fit(self.x, self.v) #?
 
     def get_solution(self):
         """
@@ -107,6 +160,8 @@ class BO_algo():
             the optimal solution of the problem
         """
         # TODO: Return your predicted safe optimum of f.
+        # max f extract
+        # return x of max f
         raise NotImplementedError
 
     def plot(self, plot_recommendation: bool = True):
@@ -130,13 +185,13 @@ def check_in_domain(x: float):
     return np.all(x >= DOMAIN[None, :, 0]) and np.all(x <= DOMAIN[None, :, 1])
 
 
-def f(x: float):
+def f(x: float): # object value f(x), matern
     """Dummy logP objective"""
     mid_point = DOMAIN[:, 0] + 0.5 * (DOMAIN[:, 1] - DOMAIN[:, 0])
     return - np.linalg.norm(x - mid_point, 2)
 
 
-def v(x: float):
+def v(x: float): # cost value SA v(x)
     """Dummy SA"""
     return 2.0
 
@@ -149,7 +204,6 @@ def get_initial_safe_point():
     np.random.seed(0)
     np.random.shuffle(x_valid)
     x_init = x_valid[0]
-
     return x_init
 
 
