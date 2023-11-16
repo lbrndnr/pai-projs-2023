@@ -12,10 +12,9 @@ from scipy.stats import norminvgauss
 # global variables
 DOMAIN = np.array([[0, 10]])  # restrict \theta in [0, 10]
 SAFETY_THRESHOLD = 4  # threshold, upper bound of SA
-n_iter = 10
-kernel_f = 1 * Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
+kernel_f = Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
 kernel_v = DotProduct() + Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
-lambda_1 = 2
+BETA = 2
 
 
 # TODO: implement a self-contained solution in the BO_algo class.
@@ -32,7 +31,6 @@ class BO_algo():
         # Minimal synthetic acessiblity score (SA) --> high SA more difficult to synthesize
         # self.x_init = 0 # initial point in domain
         
-        self.n_iter = n_iter
         self.gauss_pr_f = GaussianProcessRegressor(kernel = kernel_f) # target function? OR RBF kernel, add noise?
         self.gauss_pr_v = GaussianProcessRegressor(kernel = kernel_v)
 
@@ -50,12 +48,6 @@ class BO_algo():
         # using functions f and v.
         # In implementing this function, you may use
         # optimize_acquisition_function() defined below.
-        
-        
-        # Update the model with the new data
-        xs = np.reshape(self.x, (-1, 1))
-        self.gauss_pr_f.fit(xs, self.f)
-        # self.gauss_pr_v.fit(self.x, self.v) #?
 
         x_opt = self.optimize_acquisition_function()
         return x_opt
@@ -112,9 +104,12 @@ class BO_algo():
 
         # UCB
         mean, std = self.gauss_pr_f.predict(x, return_std=True)
-        acq_fnct = mean + lambda_1*std
+        f = mean + BETA*std
 
-        return acq_fnct
+        mean, std = self.gauss_pr_v.predict(x, return_std=True)
+        v = mean + BETA*std
+
+        return f - SAFETY_THRESHOLD * max(v, 0)
 
     def add_data_point(self, x: float, f: float, v: float):
         """
@@ -133,6 +128,11 @@ class BO_algo():
         self.x.append(x)
         self.f.append(f)
         self.v.append(v)
+
+        # Update the model with the new data
+        xs = np.reshape(self.x, (-1, 1))
+        self.gauss_pr_f.fit(xs, self.f)
+        self.gauss_pr_v.fit(xs, self.v)
     
 
     def get_solution(self):
