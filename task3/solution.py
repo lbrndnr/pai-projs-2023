@@ -5,15 +5,15 @@ from scipy.optimize import fmin_l_bfgs_b
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern
 from sklearn.gaussian_process.kernels import DotProduct # linear
-from scipy.stats import norminvgauss
+from scipy.stats import norminvgauss, norm
 
 
 
 # global variables
 DOMAIN = np.array([[0, 10]])  # restrict \theta in [0, 10]
 SAFETY_THRESHOLD = 4  # threshold, upper bound of SA
-kernel_f = Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
-kernel_v = DotProduct() + Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
+kernel_f = Matern(length_scale=0.5, length_scale_bounds=(1e-05, 10.0), nu=2.5)
+kernel_v = DotProduct() + Matern(length_scale=0.5, length_scale_bounds=(1e-05, 10000.0), nu=2.5)
 BETA = 2
 
 
@@ -31,8 +31,8 @@ class BO_algo():
         # Minimal synthetic acessiblity score (SA) --> high SA more difficult to synthesize
         # self.x_init = 0 # initial point in domain
         
-        self.gauss_pr_f = GaussianProcessRegressor(kernel = kernel_f) # target function? OR RBF kernel, add noise?
-        self.gauss_pr_v = GaussianProcessRegressor(kernel = kernel_v)
+        self.gauss_pr_f = GaussianProcessRegressor(kernel=kernel_f) # target function? OR RBF kernel, add noise?
+        self.gauss_pr_v = GaussianProcessRegressor(kernel=kernel_v)
 
 
     def next_recommendation(self):
@@ -49,8 +49,13 @@ class BO_algo():
         # In implementing this function, you may use
         # optimize_acquisition_function() defined below.
 
-        x_opt = self.optimize_acquisition_function()
-        return x_opt
+        # return self.optimize_acquisition_function()
+
+        while True:
+            x_opt = self.optimize_acquisition_function()
+            v_mean, v_std = self.gauss_pr_v.predict([[x_opt]], return_std=True)
+            if (v_mean < SAFETY_THRESHOLD):
+                return x_opt
 
 
     def optimize_acquisition_function(self):
@@ -100,14 +105,17 @@ class BO_algo():
         """
         x = np.atleast_2d(x)
         # TODO: Implement the acquisition function you want to optimize.
-        # raise NotImplementedError
 
         # UCB
-        mean, std = self.gauss_pr_f.predict(x, return_std=True)
-        f = mean + BETA*std
+        f_mean, f_std = self.gauss_pr_f.predict(x, return_std=True)
+        f = f_mean + BETA*f_std
 
-        mean, std = self.gauss_pr_v.predict(x, return_std=True)
-        v = mean + BETA*std
+        v_mean, v_std = self.gauss_pr_v.predict(x, return_std=True)
+        v = v_mean + BETA*v_std
+
+        # PI
+        # f_opt = max(self.f)
+        # f = norm.cdf((f_mean-f_opt)/f_std)
 
         return f - SAFETY_THRESHOLD * max(v, 0)
 
