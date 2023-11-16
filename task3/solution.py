@@ -12,8 +12,18 @@ from scipy.stats import norminvgauss
 # global variables
 DOMAIN = np.array([[0, 10]])  # restrict \theta in [0, 10]
 SAFETY_THRESHOLD = 4  # threshold, upper bound of SA
-kernel_f = Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
-kernel_v = DotProduct() + Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
+
+
+#kernel_f = Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
+#kernel_v = DotProduct() + Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
+
+pot_len_scales = [0.5, 1, 10]
+## Tried combos: (0,0), (1,1), (2,2), (0,2), (2,0),                                                                                           ##( (0,1), (1,0)
+## Best combo:   (2,0) -> 0.644                  (0,0) (->0.629)              (0,2) -> 0.621
+kernel_f = Matern(length_scale=pot_len_scales[2], length_scale_bounds=(1e-05, 100000.0), nu=2.5)
+kernel_v = Matern(length_scale=pot_len_scales[1], length_scale_bounds=(1e-05, 100000.0), nu=2.5) + DotProduct()
+
+
 BETA = 2
 
 
@@ -31,8 +41,8 @@ class BO_algo():
         # Minimal synthetic acessiblity score (SA) --> high SA more difficult to synthesize
         # self.x_init = 0 # initial point in domain
         
-        self.gauss_pr_f = GaussianProcessRegressor(kernel = kernel_f) # target function? OR RBF kernel, add noise?
-        self.gauss_pr_v = GaussianProcessRegressor(kernel = kernel_v)
+        self.gauss_pr_f = GaussianProcessRegressor(kernel = kernel_f)#, alpha = 0.15) # target function? OR RBF kernel, add noise?
+        self.gauss_pr_v = GaussianProcessRegressor(kernel = kernel_v)#, alpha = 1e-4)
 
 
     def next_recommendation(self):
