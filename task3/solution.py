@@ -25,9 +25,9 @@ class BO_algo():
         """Initializes the algorithm with a parameter configuration."""
         # TODO: Define all relevant class members for your BO algorithm here.
         # K: Empty list to fill with datapoints
-        x = []
-        v = []
-        f = []
+        self.x = []
+        self.v = []
+        self.f = []
         # bioavailability (logP) in [0,1]
         # Minimal synthetic acessiblity score (SA) --> high SA more difficult to synthesize
         # self.x_init = 0 # initial point in domain
@@ -50,19 +50,15 @@ class BO_algo():
         # using functions f and v.
         # In implementing this function, you may use
         # optimize_acquisition_function() defined below.
-
-        # raise NotImplementedError
-
-        # K TODO
-        # expected_v = self.gauss_pr_v.predict(self.x, return_std= False)
-
-        # check v
-
-       
-        # returns an optimal x
-        x_opt = self.optimize_acquisition_function()
-
         
+        
+        # Update the model with the new data
+        xs = np.reshape(self.x, (-1, 1))
+        self.gauss_pr_f.fit(xs, self.f)
+        # self.gauss_pr_v.fit(self.x, self.v) #?
+
+        x_opt = self.optimize_acquisition_function()
+        return x_opt
 
 
     def optimize_acquisition_function(self):
@@ -94,6 +90,7 @@ class BO_algo():
         x_opt = x_values[ind].item()
 
         return x_opt
+
 
     def acquisition_function(self, x: np.ndarray):
         """Compute the acquisition function for x.
@@ -133,22 +130,10 @@ class BO_algo():
             SA constraint func
         """
         # TODO: Add the observed data {x, f, v} to your model.
-        # raise NotImplementedError
-        # Add the x,f and v to the model parameters
-
-        #self.x = np.vstack((self.x, [[x]]))
-        #self.f = np.vstack((self.f, [[f]]))
-        #self.v = np.vstack((self.v, [[v]]))
-
-        # K: Todo --> f,v definieren
-
         self.x.append(x)
         self.f.append(f)
         self.v.append(v)
-
-        # Update the model with the new data
-        self.gauss_pr_f.fit(self.x, self.f)
-        self.gauss_pr_v.fit(self.x, self.v) #?
+    
 
     def get_solution(self):
         """
@@ -160,9 +145,10 @@ class BO_algo():
             the optimal solution of the problem
         """
         # TODO: Return your predicted safe optimum of f.
-        # max f extract
-        # return x of max f
-        raise NotImplementedError
+        fs = np.asarray(self.f)
+        idx = np.argmax(fs)
+        return self.x[idx]
+
 
     def plot(self, plot_recommendation: bool = True):
         """Plot objective and constraint posterior for debugging (OPTIONAL).
