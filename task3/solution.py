@@ -4,7 +4,7 @@ from scipy.optimize import fmin_l_bfgs_b
 # import additional ...
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern
-from sklearn.gaussian_process.kernels import DotProduct # linear
+from sklearn.gaussian_process.kernels import DotProduct, WhiteKernel # linear
 from scipy.stats import norminvgauss, norm
 
 
@@ -13,7 +13,7 @@ from scipy.stats import norminvgauss, norm
 DOMAIN = np.array([[0, 10]])  # restrict \theta in [0, 10]
 SAFETY_THRESHOLD = 4  # threshold, upper bound of SA
 LAGR_LAMBDA = 4
-EXC_INVALID = False
+EXC_INVALID = True
 
 #kernel_f = Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
 #kernel_v = DotProduct() + Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
@@ -22,7 +22,7 @@ pot_len_scales = [0.5, 1, 10]
 ## Tried combos: (0,0), (1,1), (2,2), (0,2), (2,0),                                                                                           ##( (0,1), (1,0)
 ## Best combo:   (2,0) -> 0.644                  (0,0) (->0.629)              (0,2) -> 0.621
 kernel_f = Matern(length_scale=pot_len_scales[2], length_scale_bounds=(1e-05, 100000.0), nu=2.5)
-kernel_v = Matern(length_scale=pot_len_scales[1], length_scale_bounds=(1e-05, 100000.0), nu=2.5) + DotProduct()
+kernel_v = Matern(length_scale=pot_len_scales[1], length_scale_bounds=(1e-05, 100000.0), nu=2.5) + DotProduct() +WhiteKernel(noise_level=1e-5)
 
 
 BETA = 2
