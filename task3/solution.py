@@ -3,8 +3,7 @@ import numpy as np
 from scipy.optimize import fmin_l_bfgs_b
 # import additional ...
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import Matern
-from sklearn.gaussian_process.kernels import DotProduct # linear
+from sklearn.gaussian_process.kernels import Matern, DotProduct, ConstantKernel
 from scipy.stats import norminvgauss, norm
 
 
@@ -12,20 +11,21 @@ from scipy.stats import norminvgauss, norm
 # global variables
 DOMAIN = np.array([[0, 10]])  # restrict \theta in [0, 10]
 SAFETY_THRESHOLD = 4  # threshold, upper bound of SA
-LAGR_LAMBDA = 4
+
+LAGR_LAMBDA = 3
+BETA        = 1
 EXC_INVALID = False
 
 #kernel_f = Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
 #kernel_v = DotProduct() + Matern(length_scale_bounds=(1e-05, 100000.0), nu=2.5)
 
 pot_len_scales = [0.5, 1, 10]
-## Tried combos: (0,0), (1,1), (2,2), (0,2), (2,0),                                                                                           ##( (0,1), (1,0)
-## Best combo:   (2,0) -> 0.644                  (0,0) (->0.629)              (0,2) -> 0.621
-kernel_f = Matern(length_scale=pot_len_scales[2], length_scale_bounds=(1e-05, 100000.0), nu=2.5)
-kernel_v = Matern(length_scale=pot_len_scales[1], length_scale_bounds=(1e-05, 100000.0), nu=2.5) + DotProduct()
+## Tried combos: (0,0), (1,1), (2,2), (0,2), (2,0), (2,1), (1,2), (1,0)                                            #(0,1)
+## Best combo:   (1,0) -> 0.699                              (2,0) -> 0.644                  (0,0) (->0.629)              (0,2) -> 0.621
+kernel_f = Matern(length_scale=pot_len_scales[0], length_scale_bounds=(1e-05, 100000.0), nu=2.5)
+kernel_v = Matern(length_scale=pot_len_scales[0], length_scale_bounds=(1e-05, 100000.0), nu=2.5) + DotProduct()
 
 
-BETA = 2
 
 
 # TODO: implement a self-contained solution in the BO_algo class.
@@ -42,8 +42,8 @@ class BO_algo():
         # Minimal synthetic acessiblity score (SA) --> high SA more difficult to synthesize
         # self.x_init = 0 # initial point in domain
         
-        self.gauss_pr_f = GaussianProcessRegressor(kernel = kernel_f)#, alpha = 0.15) # target function? OR RBF kernel, add noise?
-        self.gauss_pr_v = GaussianProcessRegressor(kernel = kernel_v)#, alpha = 1e-4)
+        self.gauss_pr_f = GaussianProcessRegressor(kernel = kernel_f, alpha = 0.15) # target function? OR RBF kernel, add noise?
+        self.gauss_pr_v = GaussianProcessRegressor(kernel = kernel_v, alpha = 1e-4)
 
 
     def next_recommendation(self):
@@ -70,7 +70,7 @@ class BO_algo():
                     return x_opt
         else:
             return self.optimize_acquisition_function()
-
+                   
     def optimize_acquisition_function(self):
         """Optimizes the acquisition function defined below (DO NOT MODIFY).
 
@@ -117,11 +117,11 @@ class BO_algo():
             Value of the acquisition function at x
         """
         x = np.atleast_2d(x)
+        
         # TODO: Implement the acquisition function you want to optimize.
-
         # UCB
         f_mean, f_std = self.gauss_pr_f.predict(x, return_std=True)
-        f = f_mean + BETA*f_std
+        f             = f_mean + BETA*f_std
 
         v_mean, v_std = self.gauss_pr_v.predict(x, return_std=True)
         v = v_mean + BETA*v_std
@@ -165,10 +165,22 @@ class BO_algo():
         solution: float
             the optimal solution of the problem
         """
-        # TODO: Return your predicted safe optimum of f.
-        fs = np.asarray(self.f)
-        idx = np.argmax(fs)
-        return self.x[idx]
+        ## TODO: Return your predicted safe optimum of f.
+        #fs = np.asarray(self.f)
+        #idx = np.argmax(fs)
+        #return self.x[idx]
+
+
+        # Initialize variables to track the best point and its corresponding value
+        best_x = None
+        max_f = float('-inf')  # Start with the lowest possible value
+
+        # Iterate through each set of points
+        for i in range(len(self.x)):
+            if self.v[i] < SAFETY_THRESHOLD and self.f[i] > max_f:
+                max_f = self.f[i]
+                best_x = self.x[i]
+        return best_x
 
 
     def plot(self, plot_recommendation: bool = True):
