@@ -16,6 +16,7 @@ class NeuralNetwork(nn.Module):
     This class implements a neural network with a variable number of hidden layers and hidden units.
     You may use this function to parametrize your policy and critic networks.
     '''
+
     def __init__(self, input_dim: int, output_dim: int, hidden_size: int, 
                                 hidden_layers: int, activation: str):
         super(NeuralNetwork, self).__init__()
@@ -24,11 +25,43 @@ class NeuralNetwork(nn.Module):
         # with a variable number of hidden layers and hidden units.
         # Here you should define layers which your network will use.
 
+        # first layer 
+        layers = [nn.Linear(input_dim, hidden_size)]
+
+        # Append hidden layers
+        for _ in range(hidden_layers - 1):
+            layers.append(nn.Linear(hidden_size, hidden_size))
+
+        # Append output layer
+        layers.append(nn.Linear(hidden_size, output_dim))
+
+        self.layers = nn.Sequential(layers)
+
+        # Choose activation function
+        if activation == 'relu':
+            self.activation = torch.nn.ReLU()
+        elif activation == 'tanh':
+            self.activation = torch.tanh()
+        else:
+            raise ValueError("Unsupported activation function")
+
     def forward(self, s: torch.Tensor) -> torch.Tensor:
         # TODO: Implement the forward pass for the neural network you have defined.
-        pass
+        for layer in self.layers[:-1]:
+            s = self.activation(layer(s))
+        s = self.layers[-1](s)
+
+        return s
+
+
+   # def forward(self, s: torch.Tensor) -> torch.Tensor:
+   #     # TODO: Implement the forward pass for the neural network you have defined.
+   #     s = self.flatten(s)
+
+
+
     
-class Actor:
+class Actor: # learns policy
     def __init__(self,hidden_size: int, hidden_layers: int, actor_lr: float,
                 state_dim: int = 3, action_dim: int = 1, device: torch.device = torch.device('cpu')):
         super(Actor, self).__init__()
@@ -49,7 +82,7 @@ class Actor:
         '''
         # TODO: Implement this function which sets up the actor network. 
         # Take a look at the NeuralNetwork class in utils.py. 
-        pass
+        self.actor_network = NeuralNetwork(self.state_dim, self.action_dim, self.hidden_size, self.hidden_layers, activation='tanh')
 
     def clamp_log_std(self, log_std: torch.Tensor) -> torch.Tensor:
         '''
@@ -79,7 +112,7 @@ class Actor:
         return action, log_prob
 
 
-class Critic:
+class Critic: # learns the value
     def __init__(self, hidden_size: int, 
                  hidden_layers: int, critic_lr: int, state_dim: int = 3, 
                     action_dim: int = 1,device: torch.device = torch.device('cpu')):
@@ -95,7 +128,12 @@ class Critic:
     def setup_critic(self):
         # TODO: Implement this function which sets up the critic(s). Take a look at the NeuralNetwork 
         # class in utils.py. Note that you can have MULTIPLE critic networks in this class.
-        pass
+
+        #K: add multiple critics
+        #K ?
+        self.critic_network = NeuralNetwork(self.state_dim + self.action_dim, 1, self.hidden_size,
+                                        self.hidden_layers, activation='relu')
+        
 
 class TrainableParameter:
     '''
@@ -134,7 +172,14 @@ class Agent:
     def setup_agent(self):
         # TODO: Setup off-policy agent with policy and critic classes. 
         # Feel free to instantiate any other parameters you feel you might need.   
-        pass
+        self.hidden_size = 256
+        self.hidden_layers = 2
+        self.actor_lr = 0.0003
+        self.critic_lr = 0.0003
+        
+        self.policy = Actor(self.hidden_size, self.hidden_layers, self.actor_lr, self.state_dim, self.action_dim, self.device)
+        self.critic = Critic(self.hidden_size, self.hidden_layers, self.critic_lr, self.state_dim, self.action_dim, self.device)
+        return
 
     def get_action(self, s: np.ndarray, train: bool) -> np.ndarray:
         """
@@ -210,7 +255,7 @@ if __name__ == '__main__':
     verbose = True
 
     agent = Agent()
-    env = get_env(g=10.0, train=True)
+    env = get_env(g=10.0, train=True) # get the value of an environment variable
 
     for EP in range(TRAIN_EPISODES):
         run_episode(env, agent, None, verbose, train=True)
