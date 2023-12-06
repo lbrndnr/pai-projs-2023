@@ -76,13 +76,23 @@ class Actor: # learns policy
         self.LOG_STD_MAX = 2
         self.setup_actor()
 
+
+
+
     def setup_actor(self):
         '''
         This function sets up the actor network in the Actor class.
         '''
         # TODO: Implement this function which sets up the actor network. 
         # Take a look at the NeuralNetwork class in utils.py. 
-        self.actor_network = NeuralNetwork(self.state_dim, self.action_dim, self.hidden_size, self.hidden_layers, activation='tanh')
+        self.actor_network = NeuralNetwork(input_dim=self.state_dim, 
+                                           output_dim=self.action_dim, 
+                                           hidden_size=self.hidden_size, 
+                                           hidden_layers=self.hidden_layers, 
+                                           activation='relu')
+
+        self.optimizer = torch.optim.Adam(self.actor_network.parameters(), lr=self.actor_lr)
+
 
     def clamp_log_std(self, log_std: torch.Tensor) -> torch.Tensor:
         '''
@@ -131,9 +141,13 @@ class Critic: # learns the value
 
         #K: add multiple critics
         #K ?
-        self.critic_network = NeuralNetwork(self.state_dim + self.action_dim, 1, self.hidden_size,
-                                        self.hidden_layers, activation='relu')
-        
+        self.critic_network = NeuralNetwork(input_dim=self.state_dim + self.action_dim, 
+                                            output_dim=1, 
+                                            hidden_size=self.hidden_size, 
+                                            hidden_layers=self.hidden_layers, 
+                                            activation='relu')
+
+        self.optimizer = torch.optim.Adam(self.critic_network.parameters(), lr=self.critic_lr)
 
 class TrainableParameter:
     '''
