@@ -28,11 +28,11 @@ class NeuralNetwork(nn.Module):
 
         # Choose activation function
         act_mod = None
-        if activation == 'relu':
+        if activation == "relu":
             act_mod = nn.ReLU()
-        elif activation == 'tanh':
+        elif activation == "tanh":
             act_mod = nn.Tanh()
-        elif activation == 'leaky_relu':
+        elif activation == "leaky_relu":
             act_mod = nn.LeakyReLU()
         else:
             raise ValueError("Unsupported activation function")
@@ -72,7 +72,7 @@ class Actor: # learns policy
         '''
         # TODO: Implement this function which sets up the actor network. 
         # Take a look at the NeuralNetwork class in utils.py. 
-        self.actor_network = NeuralNetwork(self.state_dim, 2*self.action_dim, self.hidden_size, self.hidden_layers, activation='leaky_relu')
+        self.actor_network = NeuralNetwork(self.state_dim, 2*self.action_dim, self.hidden_size, self.hidden_layers, activation="relu")
         self.optimizer = optim.Adam(self.actor_network.parameters(), lr=self.actor_lr)
 
     def clamp_log_std(self, log_std: torch.Tensor) -> torch.Tensor:
@@ -140,9 +140,11 @@ class Critic: # learns the value
 
         #K: add multiple critics
         #K ?
-        self.critic_network = NeuralNetwork(self.state_dim + self.action_dim, 1, self.hidden_size,
-                                        self.hidden_layers, activation='leaky_relu')
-        self.optimizer = optim.Adam(self.critic_network.parameters(), lr=self.critic_lr)
+        self.q1 = NeuralNetwork(self.state_dim + self.action_dim, self.action_dim, self.hidden_size, self.hidden_layers, activation="relu")
+        self.q1t = NeuralNetwork(self.state_dim + self.action_dim, self.action_dim, self.hidden_size, self.hidden_layers, activation="relu")
+        self.q2 = NeuralNetwork(self.state_dim + self.action_dim, self.action_dim, self.hidden_size, self.hidden_layers, activation="relu")
+        self.q2t = NeuralNetwork(self.state_dim + self.action_dim, self.action_dim, self.hidden_size, self.hidden_layers, activation="relu")
+        self.optimizer = optim.Adam(list(self.q1.parameters()) + list(self.q2.parameters()), lr=self.critic_lr)
         
 
 class TrainableParameter:
@@ -187,25 +189,14 @@ class Agent:
         self.actor_lr = 0.001
         self.critic_lr = 0.001
 
-        # TODO(2): I think we can implement this using TrainableParameter
-        self.alpha = 0.005
-        self.init_alpha = 0.01
-        self.log_alpha = torch.tensor(np.log(self.init_alpha)).to(self.device)
-        self.log_alpha.requires_grad = True
-        self.log_alpha_optimizer = optim.Adam([self.log_alpha], lr=0.005)
-
+        self.alpha = TrainableParameter(0.01, 0.005, True)
+        self.tau = 0.05
         self.gamma = 0.98
         
         self.policy = Actor(self.hidden_size, self.hidden_layers, self.actor_lr, self.state_dim, self.action_dim, self.device)
-
-        # TODO(2): Use one critic with all of the networks inside
-        self.critic1 = Critic(self.hidden_size, self.hidden_layers, self.critic_lr, self.state_dim, self.action_dim, self.device)
-        self.critic1_target = Critic(self.hidden_size, self.hidden_layers, self.critic_lr, self.state_dim, self.action_dim, self.device)
-        self.critic2 = Critic(self.hidden_size, self.hidden_layers, self.critic_lr, self.state_dim, self.action_dim, self.device)
-        self.critic2_target = Critic(self.hidden_size, self.hidden_layers, self.critic_lr, self.state_dim, self.action_dim, self.device)
-
-        self.critic_target_update(self.critic1.critic_network, self.critic1_target.critic_network, 1, False)
-        self.critic_target_update(self.critic2.critic_network, self.critic2_target.critic_network, 1, False)
+        self.critic = Critic(self.hidden_size, self.hidden_layers, self.critic_lr, self.state_dim, self.action_dim, self.device)
+        self.critic_target_update(self.critic.q1, self.critic.q1t, 1, False)
+        self.critic_target_update(self.critic.q2, self.critic.q2t, 1, False)
 
     def get_action(self, s: np.ndarray, train: bool) -> np.ndarray:
         """
@@ -267,37 +258,33 @@ class Agent:
 
         with torch.no_grad():
             a_prime_batch, log_prob_prime_batch = self.policy.get_action_and_log_prob(s_batch, deterministic=False)
-            entropy = - self.log_alpha.exp() * log_prob_prime_batch
+            entropy = - self.alpha.get_param() * log_prob_prime_batch
             input = torch.cat([s_prime_batch, a_prime_batch], dim=-1)
-            critic1_target, critic2_target = self.critic1_target.critic_network(input), self.critic2_target.critic_network(input)
-            critic_target = torch.min(critic1_target, critic2_target)
-            target = r_batch + self.gamma * (critic_target + entropy)
+            q1t, q2t = self.critic.q1t(input), self.critic.q2t(input)
+            qt = torch.min(q1t, q2t)
+            target = r_batch + self.gamma * (qt + entropy)
 
         # TODO: Implement Critic(s) update here.
         input = torch.cat([s_batch, a_batch], dim=-1)
-        critic1_loss = F.smooth_l1_loss(self.critic1.critic_network(input), target)
-        self.run_gradient_update_step(self.critic1, critic1_loss)
-
-        critic2_loss = F.smooth_l1_loss(self.critic2.critic_network(input), target)
-        self.run_gradient_update_step(self.critic2, critic2_loss)
+        q1_loss = F.smooth_l1_loss(self.critic.q1(input), target)
+        q2_loss = F.smooth_l1_loss(self.critic.q2(input), target)
+        self.run_gradient_update_step(self.critic, q1_loss+q2_loss)
 
         # TODO: Implement Policy update here
         a_prime_batch, log_prob_batch = self.policy.get_action_and_log_prob(s_batch, deterministic=False)
-        entropy = -self.log_alpha.exp() * log_prob_batch
+        entropy = -self.alpha.get_param() * log_prob_batch
 
         input = torch.cat([s_batch, a_prime_batch], dim=-1)
-        q1, q2 = self.critic1.critic_network(input), self.critic2.critic_network(input)
+        q1, q2 = self.critic.q1(input), self.critic.q2(input)
         q = torch.min(q1, q2)
         policy_loss = -(q + entropy)
         self.run_gradient_update_step(self.policy, policy_loss)
 
-        self.log_alpha_optimizer.zero_grad()
-        alpha_loss = -(self.log_alpha.exp() * (log_prob_batch - 1).detach()).mean()
-        alpha_loss.backward()
-        self.log_alpha_optimizer.step()
+        alpha_loss = -(self.alpha.get_param() * (log_prob_batch - 1).detach()).mean()
+        self.run_gradient_update_step(self.alpha, alpha_loss)
 
-        self.critic_target_update(self.critic1.critic_network, self.critic1_target.critic_network, self.alpha, True)
-        self.critic_target_update(self.critic2.critic_network, self.critic2_target.critic_network, self.alpha, True)
+        self.critic_target_update(self.critic.q1, self.critic.q1t, self.tau, True)
+        self.critic_target_update(self.critic.q2, self.critic.q2t, self.tau, True)
 
 
 # This main function is provided here to enable some basic testing. 
