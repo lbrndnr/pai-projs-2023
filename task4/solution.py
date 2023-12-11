@@ -105,16 +105,10 @@ class Actor: # learns policy
         std = torch.exp(log_std)
         reparameter = Normal(mu, std)
         x_t = mu if deterministic else reparameter.rsample()
-        y_t = torch.tanh(x_t)
-
-        max_action = 1
-        min_action = -1
-        action_scale = (max_action - min_action) / 2.0
-        action_bias = (max_action + min_action) / 2.0
-        action = action_scale * y_t + action_bias
+        action = torch.tanh(x_t)
 
         log_prob = reparameter.log_prob(x_t)
-        log_prob = log_prob - torch.sum(torch.log(action_scale * (1 - y_t.pow(2)) + 1e-6), dim=-1, keepdim=True)
+        log_prob = log_prob - torch.sum(torch.log(1 - action.pow(2) + 1e-6), dim=-1, keepdim=True)
 
         assert action.shape == (state.shape[0], self.action_dim) and \
             log_prob.shape == (state.shape[0], self.action_dim), 'Incorrect shape for action or log_prob.'
